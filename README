@@ -1,0 +1,116 @@
+									CSE-506 OPERATING SYSTEMS ASSIGNMENT
+										MOHIT GOYAL(110349552)
+											OCTOBER 4, 2015
+
+OVERVIEW:
+		xcipher is a test program which will invoke the system call sys_xcrypt. The sys_xcrypt is loadable kernel module. The system call "sys_xcrypt" encrypt or decrypt the file depending upon the encryption/decryption flag, other options using the provided key.
+
+SYNTAX:
+		For encryption:		./xcipher -p "password" -e infile outfile
+		
+		For decryption:		./xcipher -p "password" -d infile outfile
+
+BUILD AND INSTALL:
+		1. Kernel Hacks: 
+				The following files have been modified in the kernel.
+				
+				/arch/x86/syscalls/syscall_32.tbl: Added new syscall number for sys_xcrypt
+				
+				/include/linux/syscalls.h: Added new prototype function for syscall
+				
+				/fs/namei.c: Exported the getname function
+		
+		2. User Hacks:
+				Openssl is required for crypto hash functions used in xcipher program. Please make sure it is installed.
+		
+		3. Install:
+				Under the hw1/ directory, "make" will generate a kernel module sys_xcrypt.ko and an executable xcipher.
+
+DESCRIPTION:
+		xcipher encrypts or decrypt the specified infile into outfile. It will take password from ther user and using that password, it will encrypt or decrypt the infile to outfile. The outfile specified could be an already existing file or new file. If the outfile does not exist, it would be created by default with same permission as of infile. If system call executes successfully, it returns 0 to user level. In case of failure, it will return -1 and appropriate error number.
+		The option flags which are used, are described below:
+		
+		-p (password): This is the option to take the password from user which will be used for encryption or decryption.
+		
+		-e (encryption): This flag is used to specify that system call has to do encryption of the infile using password.
+		
+		-d (decryption): This is the option to specify that system call has to do decryption of the infile using password.
+		
+		-h (help): This flag prints help message defining the usage of the call.
+		
+		// extra credit
+		-u (block size): The flag is to provide the block size which should be used for encryption or decryption of file.
+		
+		-l (key length): The key length flag is to support mutliple key lengths used for encryption or decryption.
+
+APPROACH:
+		The following steps describes in detail how the system call works:
+		
+		// user level program
+		1. The user level program takes input from user and do various validation checks and returns an error with appropriate message. The various checks are:
+			
+			a. Check for the length of password, it should be greater than 6 characters.
+			b. Infile and Outfile are not missing.
+			c. Password option is given and also checks whether password is entered or not.
+			d. Checks for encryption or decryption option.
+			e. Validates that both encryption and decryption option is not given at the same time.
+			f. Checks for valid options and returns an error for invalid options.
+			
+		2. After taking the options and parameters from the user. The program will verify the key for new line character and removes it if present or return error if fail.
+		
+		3. When the verification of password is completed. The password is hashed using PKCS5 or MD5 encryption depending upon the keylength so that attacker will not easily get the key while passing it to kernel.
+		
+		4. After that all the parameter are packed in structure and passes a void pointer to this structure into kernel.
+		
+		// kernel level 
+		5. First of all kernel module checks for the null arguments and validity of user arguments addresses.
+		
+		6. After that it allocates the memory in kernel for the arguments structure and copies the arguments from user space into kernel space.
+		
+		7. It allocates memory for hashed key and do the second MD5 encryption on the key which was passed from user level program.
+		
+		8. After that it do various checks for the validity of arguments and files:
+			a. Check for NULL arguments or zero key length.
+			b. Checks for Infile or outfile cannot be read/written (e.g., Read/Write permissions, Read-only FS, wrong filename).
+			c. Validate for Infile or outfile is not regular.
+			d. Validate for Infile and outfile point to the same file or not.
+		
+		9. It allocates memory for in buffer and out buffer to do read and write operations.
+		
+		10. It checks if outfile already exists or not and create temp file to write with encrypted/decrypted buf.
+		
+		11. Then kernel preambled the double hashed key into outfile (Which will be used for validating the key while decryption of the file). While decrypting, it checks if the MD5 hashing of the decryption key is same as the one stored in the preamble.
+		
+		12. It handles the zero size file and will just add the preamble in the encrypted file. If there occurs any error kernel will clear all the partial and temporary files.
+		
+		11. Now it start reading blocks of size by default PAGE (if user provides then it read blocks of that size) from infile and depending upon the flag value it calls the appropriate function to do the encryption or decryption of the buffer read from infile. The cipher used is ctr(aes).
+		
+		12. After successful encryption or decryption it rename the tempfile to outfile or unlinks the tempfile if there occurred some error while renaming.
+		
+		13. Then it copy back the user arguments from kernel space to user space.
+		
+		14. After that all the memory used are deallocated and all other resources are released.
+		
+		// back to user level
+		
+		15. It prints the message returned from system call, if there is error it will print the appropriate errno.
+		
+		16. The memory allocated in user program is deallocated.
+
+EXTRA CREDIT:
+		The extra credit code is wrapped in #ifdef--#else--#endif. By default, I have commented the #define EXTRA_CREDIT macro in common.h file. So to test the extra credit functionality, please uncomment the #define EXTRA_CREDIT macro in common header file. You need to "make clean" and insert the kernel module again. I have implemented A and C part of extra credit. So, it works well for multiple block sizes "-u" and multiple key lenghts "-l" option when macro is enabled. I have also implemented the IV with first 8 bytes as page number and next 8 bytes as inode number of the file to generate stronger encryption. For "-c" it will give Error Invalid Argument.
+
+FILES:
+		1. common.h: common header file
+		2. xcipher.h: header file for user level program
+		3. xcipher.c: user level program
+		4. sys_xcrypt.c: kernel module
+		5. Makefile: compile the user level program and kernel module
+		6. install_module.sh: insert and remove kernel module
+		7. README: documentation file
+		8. kernel.config: kernel configuration file
+
+REFERENCES:
+		http://lxr.free-electrons.com/source/fs/ecryptfs/crypto.c
+		https://www.openssl.org/docs/manmaster/crypto/PKCS5_PBKDF2_HMAC.html
+		http://stackoverflow.com/questions/3869028/how-to-use-cryptoapi-in-the-linux-kernel-2-6
